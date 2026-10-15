@@ -1,0 +1,170 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>AI 岗位匹配分析器</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+
+  <header class="site-header">
+    <div class="wrap header-inner">
+      <div class="brand">
+        <span class="brand-mark">AI</span>
+        <div>
+          <h1>岗位匹配分析器</h1>
+          <p class="brand-sub">上传简历 + 粘贴岗位JD，自动算出匹配度与关键词缺口</p>
+        </div>
+      </div>
+      <div class="llm-badge {{ 'ok' if llm_ready else 'off' }}">
+        {% if llm_ready %}
+          AI 建议已启用 · {{ llm_model }}
+        {% else %}
+          未配置 API Key · 使用规则建议
+        {% endif %}
+      </div>
+    </div>
+  </header>
+
+  <main class="wrap layout">
+
+    <!-- ============ 左侧：输入区 ============ -->
+    <section class="panel input-panel">
+      <h2 class="panel-title">输入</h2>
+
+      <div class="field">
+        <label class="field-label">第 1 步 · 你的简历</label>
+        <div class="tabs" role="tablist">
+          <button type="button" class="tab active" data-tab="file">上传文件</button>
+          <button type="button" class="tab" data-tab="text">粘贴文本</button>
+        </div>
+
+        <div class="tab-pane active" data-pane="file">
+          <input type="file" id="resumeFile" accept=".pdf,.docx,.txt,.md">
+          <p class="hint">支持 PDF / DOCX / TXT / MD，大小不超过 10MB。若是扫描件 PDF 请改用「粘贴文本」。</p>
+        </div>
+
+        <div class="tab-pane" data-pane="text">
+          <textarea id="resumeText" rows="8" placeholder="把简历全文粘贴到这里，包括教育背景、项目经历、技能等……"></textarea>
+        </div>
+      </div>
+
+      <div class="field">
+        <label class="field-label">第 2 步 · 岗位 JD</label>
+        <textarea id="jdText" rows="10" placeholder="把目标岗位的完整职位描述粘贴到这里，包含任职要求部分……"></textarea>
+      </div>
+
+      <div class="field row-2">
+        <div>
+          <label class="field-label" for="degree">你的学历</label>
+          <select id="degree">
+            <option value="本科" selected>本科（在读/已毕业）</option>
+            <option value="大专">大专</option>
+            <option value="硕士">硕士</option>
+            <option value="博士">博士</option>
+            <option value="中专">中专</option>
+          </select>
+        </div>
+        <div>
+          <label class="field-label" for="workYears">工作年限</label>
+          <input type="number" id="workYears" value="0" min="0" max="30" step="1">
+        </div>
+      </div>
+
+      <button type="button" id="analyzeBtn" class="btn-primary">开始分析</button>
+      <p class="hint center">应届生工作年限填 0；有实习经历可按实际年数填 1</p>
+    </section>
+
+    <!-- ============ 右侧：结果区 ============ -->
+    <section class="panel result-panel">
+
+      <div id="emptyState" class="empty-state">
+        <div class="empty-icon">◎</div>
+        <p class="empty-title">还没有分析结果</p>
+        <p class="empty-desc">在左侧填好简历和岗位 JD，点击「开始分析」</p>
+      </div>
+
+      <div id="loadingState" class="empty-state hidden">
+        <div class="spinner"></div>
+        <p class="empty-title">正在分析…</p>
+        <p class="empty-desc" id="loadingStep">解析简历</p>
+      </div>
+
+      <div id="errorState" class="empty-state hidden">
+        <div class="empty-icon error">!</div>
+        <p class="empty-title">分析失败</p>
+        <p class="empty-desc" id="errorMsg"></p>
+      </div>
+
+      <div id="resultState" class="hidden">
+
+        <div class="score-block">
+          <div class="score-ring" id="scoreRing">
+            <span class="score-num" id="scoreNum">0</span>
+            <span class="score-unit">分</span>
+          </div>
+          <div class="score-meta">
+            <p class="score-grade" id="scoreGrade">—</p>
+            <p class="score-detail" id="scoreDetail">—</p>
+          </div>
+        </div>
+
+        <div class="gate-grid">
+          <div class="gate" id="gateSkill">
+            <span class="gate-label">技能匹配</span>
+            <span class="gate-value">—</span>
+          </div>
+          <div class="gate" id="gateDegree">
+            <span class="gate-label">学历门槛</span>
+            <span class="gate-value">—</span>
+          </div>
+          <div class="gate" id="gateExp">
+            <span class="gate-label">经验门槛</span>
+            <span class="gate-value">—</span>
+          </div>
+        </div>
+
+        <div class="block">
+          <h3 class="block-title">已命中的关键词 <span class="count" id="hitCount">0</span></h3>
+          <div class="chips" id="hitChips"></div>
+        </div>
+
+        <div class="block">
+          <h3 class="block-title">缺失的关键词 <span class="count warn" id="missCount">0</span></h3>
+          <div class="chips" id="missChips"></div>
+          <p class="hint">权重越高代表 JD 中越强调。权重 ≥ 1.5 的项会标红，属于简历筛选的关键词。</p>
+        </div>
+
+        <div class="block" id="notesBlock">
+          <h3 class="block-title">门槛提示</h3>
+          <ul class="notes" id="notesList"></ul>
+        </div>
+
+        <div class="block">
+          <h3 class="block-title" id="adviceTitle">改进建议</h3>
+          <div class="advice" id="adviceBox"></div>
+        </div>
+
+        <details class="block raw">
+          <summary>查看解析出的原始文本</summary>
+          <p class="hint">简历来源：<span id="resumeSource">—</span></p>
+          <p class="raw-label">简历内容（前 160 字）</p>
+          <p class="raw-text" id="resumePreview">—</p>
+          <p class="raw-label">岗位 JD（前 160 字）</p>
+          <p class="raw-text" id="jdPreview">—</p>
+        </details>
+
+      </div>
+    </section>
+  </main>
+
+  <footer class="site-footer">
+    <div class="wrap">
+      <p>AI 岗位匹配分析器 · 匹配打分由本地规则引擎计算，结果稳定可复现；大模型仅用于生成改进建议。</p>
+    </div>
+  </footer>
+
+  <script src="{{ url_for('static', filename='app.js') }}"></script>
+</body>
+</html>
