@@ -1,0 +1,6 @@
+# 忽略规则自身不写入 —— 否则 .gitignore 会被自己排除，导致保护规则进不了仓库
+__pycache__/
+*.pyc
+.venv/
+config.json
+!config.example.json
